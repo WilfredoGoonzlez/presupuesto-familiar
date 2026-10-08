@@ -29,6 +29,7 @@ const montosGastos: Record<CategoriaGasto, number> = {
 
 let estado: EstadoPartida = crearEstado();
 let mensaje = "";
+let imprevistoMedicoResuelto = false;
 
 app.addEventListener("click", (evento: MouseEvent) => {
   const objetivo = evento.target;
@@ -42,19 +43,21 @@ app.addEventListener("click", (evento: MouseEvent) => {
   }
 
   if (boton.dataset.categoria) {
-    const categoria = boton.dataset.categoria as CategoriaGasto;
-    mensaje = asignarGasto(estado, categoria)
-      ? `${etiquetasGastos[categoria]} agregado al presupuesto.`
-      : "No se pudo agregar esa categoría.";
+    const categoria = obtenerCategoria(boton.dataset.categoria);
+    if (!categoria) {
+      return;
+    }
+    asignarCategoria(categoria);
     dibujar();
     return;
   }
 
   if (boton.dataset.opcionMedica) {
-    const opcion = boton.dataset.opcionMedica as OpcionMedica;
-    mensaje = responderImprevistoMedico(estado, opcion)
-      ? "Decisión médica registrada."
-      : "No se pudo registrar la decisión.";
+    const opcion = obtenerOpcionMedica(boton.dataset.opcionMedica);
+    if (!opcion) {
+      return;
+    }
+    elegirOpcionMedica(opcion);
     dibujar();
     return;
   }
@@ -69,40 +72,100 @@ app.addEventListener("click", (evento: MouseEvent) => {
 
   if (boton.hasAttribute("data-reiniciar")) {
     estado = crearEstado();
+    imprevistoMedicoResuelto = false;
     mensaje = "Comienza un nuevo mes. Asigna tus gastos básicos.";
     dibujar();
   }
 });
 
 document.addEventListener("keydown", (evento: KeyboardEvent) => {
+  if (
+    evento.defaultPrevented ||
+    evento.repeat ||
+    evento.isComposing ||
+    evento.altKey ||
+    evento.ctrlKey ||
+    evento.metaKey
+  ) {
+    return;
+  }
+
   if (evento.code === "Space") {
     evento.preventDefault();
-    if (evento.repeat || estado.resultado !== "enCurso") {
+    if (estado.resultado !== "enCurso") {
       return;
     }
-    mensaje = avanzarSemana(estado)
-      ? "La semana avanzó y se descontaron los gastos asignados."
-      : mensajeAlNoAvanzar();
+    avanzar();
     dibujar();
     return;
   }
 
-  if (!estado.imprevistoMedicoPendiente || estado.resultado !== "enCurso") {
+  if (estado.resultado !== "enCurso") {
     return;
   }
 
-  const opciones: Record<string, OpcionMedica> = {
-    "1": "consultaCompleta",
-    "2": "arriesgarse",
-  };
-  const opcion = opciones[evento.key];
-  if (opcion) {
-    mensaje = responderImprevistoMedico(estado, opcion)
-      ? "Decisión médica registrada."
-      : "No se pudo registrar la decisión.";
-    dibujar();
+  if (estado.imprevistoMedicoPendiente) {
+    const opciones: Record<string, OpcionMedica> = {
+      "1": "consultaCompleta",
+      "2": "arriesgarse",
+    };
+    const opcion = opciones[evento.key];
+    if (opcion) {
+      elegirOpcionMedica(opcion);
+      dibujar();
+    }
+    return;
+  }
+
+  if (estado.semana === 1) {
+    const categorias: Record<string, CategoriaGasto> = {
+      "1": "alimentos",
+      "2": "servicios",
+      "3": "transporte",
+    };
+    const categoria = categorias[evento.key];
+    if (categoria) {
+      asignarCategoria(categoria);
+      dibujar();
+    }
   }
 });
+
+function obtenerCategoria(valor: string): CategoriaGasto | undefined {
+  if (valor === "alimentos" || valor === "servicios" || valor === "transporte") {
+    return valor;
+  }
+  return undefined;
+}
+
+function obtenerOpcionMedica(valor: string): OpcionMedica | undefined {
+  if (valor === "consultaCompleta" || valor === "arriesgarse") {
+    return valor;
+  }
+  return undefined;
+}
+
+function asignarCategoria(categoria: CategoriaGasto): void {
+  mensaje = asignarGasto(estado, categoria)
+    ? `${etiquetasGastos[categoria]} agregado al presupuesto.`
+    : "No se pudo agregar esa categoría.";
+}
+
+function elegirOpcionMedica(opcion: OpcionMedica): void {
+  const resuelta = responderImprevistoMedico(estado, opcion);
+  mensaje = resuelta
+    ? "Decisión médica registrada."
+    : "No se pudo registrar la decisión.";
+  if (resuelta) {
+    imprevistoMedicoResuelto = true;
+  }
+}
+
+function avanzar(): void {
+  mensaje = avanzarSemana(estado)
+    ? "La semana avanzó y se descontaron los gastos asignados."
+    : mensajeAlNoAvanzar();
+}
 
 function mensajeAlNoAvanzar(): string {
   if (estado.imprevistoMedicoPendiente) {
@@ -199,7 +262,9 @@ function dibujar(): void {
               <p class="ayuda">Atajos de teclado: 1 o 2 para elegir.</p>
             `
             : `<p class="texto-imprevisto">${
-                estado.semana > CONFIG.semanaImprevistoMedico || estado.resultado !== "enCurso"
+                imprevistoMedicoResuelto ||
+                estado.semana > CONFIG.semanaImprevistoMedico ||
+                estado.resultado !== "enCurso"
                   ? "El imprevisto médico ya fue resuelto o no se activó."
                   : "El imprevisto aparecerá al comenzar la semana 2."
               }</p>`
@@ -215,7 +280,7 @@ function dibujar(): void {
           ${estado.resultado !== "enCurso" || estado.imprevistoMedicoPendiente || !Object.values(estado.gastosAsignados).every(Boolean) ? "disabled" : ""}
         >
           ${estado.resultado === "enCurso" ? "Avanzar semana" : "Mes finalizado"}
-          <span class="atajo">Barra espaciadora</span>
+          <span class="atajo">${estado.semana === 1 && estado.resultado === "enCurso" ? "Teclas 1–3 para asignar · " : ""}Barra espaciadora</span>
         </button>
       </div>
 
